@@ -52,3 +52,7 @@ npm-debug.log*
 *.pkl
 *.faiss
 RAG_Claude/
+
+
+#environment variables
+.env

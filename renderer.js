@@ -22,6 +22,26 @@ const playStatusDisplay = document.getElementById('playStatus');
 const vjsVersionDisplay = document.getElementById('vjsVersion');
 
 // =============================================================================
+// SUBTITLE DATA STORAGE
+// =============================================================================
+
+let subtitles = [];  // Will store subtitle segments with timestamps
+let currentSubtitleIndex = -1;  // Track which subtitle is currently showing
+
+// Speaker color mapping (for diarization)
+const speakerColors = {
+    'SPEAKER_00': '#00ff00',  // Green
+    'SPEAKER_01': '#00bfff',  // Blue
+    'SPEAKER_02': '#ffff00',  // Yellow
+    'SPEAKER_03': '#ff69b4',  // Pink
+    'SPEAKER_04': '#ff8c00',  // Orange
+    'SPEAKER_05': '#9370db',  // Purple
+};
+
+// Default color if speaker not in map
+const defaultColor = '#ffffff';  // White
+
+// =============================================================================
 // PLAYER INITIALIZATION
 // =============================================================================
 
@@ -96,24 +116,24 @@ function setupPlayerEvents() {
     // TIMEUPDATE - Fires while video is playing
     // This is THE MOST IMPORTANT event for subtitle synchronization!
     // =========================================================================
+    // NEW timeupdate handler with subtitle synchronization:
     player.on('timeupdate', function() {
-        // From docs: player.currentTime() returns current playback position
         const currentTime = player.currentTime();
-        
-        // From docs: player.duration() returns total video duration
         const duration = player.duration();
-        
-        // From docs: player.bufferedPercent() returns buffered percentage
         const bufferedPercent = player.bufferedPercent();
         
-        // Update UI
+        // Update UI displays
         currentTimeDisplay.textContent = currentTime.toFixed(2);
         durationDisplay.textContent = isFinite(duration) ? duration.toFixed(2) : '0.00';
         bufferedDisplay.textContent = (bufferedPercent * 100).toFixed(0) + '%';
         
-        // TODO: In Step 3, we'll check subtitle timestamps here
-        // Example logic:
-        // checkAndDisplaySubtitle(currentTime);
+        // =========================================================================
+        // SUBTITLE SYNCHRONIZATION - THE MAGIC HAPPENS HERE!
+        // =========================================================================
+        
+        if (subtitles.length > 0) {
+            checkAndDisplaySubtitle(currentTime);
+        }
     });
     
     // =========================================================================
@@ -229,14 +249,50 @@ function setupPlayerEvents() {
 }
 
 // =============================================================================
-// VIDEO FILE LOADING
+// UTILITY FUNCTIONS
 // =============================================================================
 
 /**
- * Handle video file selection
- * Using player.src() method from documentation
+ * Get MIME type for video file based on extension
+ * 
+ * @param {string} filename - The video filename
+ * @returns {string} - The MIME type
  */
-videoFileInput.addEventListener('change', function(event) {
+function getVideoMimeType(filename) {
+    const ext = filename.toLowerCase().split('.').pop();
+    
+    const mimeTypes = {
+        'mp4': 'video/mp4',
+        'm4v': 'video/mp4',
+        'webm': 'video/webm',
+        'ogg': 'video/ogg',
+        'ogv': 'video/ogg',
+        'mov': 'video/quicktime',
+        'avi': 'video/x-msvideo',
+        'mkv': 'video/x-matroska',
+        'flv': 'video/x-flv',
+        '3gp': 'video/3gpp',
+        'wmv': 'video/x-ms-wmv'
+    };
+    
+    return mimeTypes[ext] || 'video/mp4';  // Default to mp4 if unknown
+}
+
+// =============================================================================
+// VIDEO FILE LOADING WITH TRANSCRIPTION
+// =============================================================================
+
+/**
+ * Handle video file selection and trigger transcription
+ * 
+ * Flow:
+ * 1. User selects video file
+ * 2. Load video into player (so they can watch it)
+ * 3. Send video to main process for transcription
+ * 4. Receive subtitles and store them
+ * 5. Subtitles will show automatically during playback (via timeupdate event)
+ */
+videoFileInput.addEventListener('change', async function(event) {
     const file = event.target.files[0];
     
     if (!file) {
@@ -246,8 +302,7 @@ videoFileInput.addEventListener('change', function(event) {
     // Create blob URL for the file
     const fileURL = URL.createObjectURL(file);
     
-    // From Video.js docs: player.src() accepts an object or array
-    // Object format: { type: 'video/mp4', src: 'url' }
+    // Set the video source using Video.js
     player.src({
         type: getVideoMimeType(file.name),
         src: fileURL
@@ -255,40 +310,50 @@ videoFileInput.addEventListener('change', function(event) {
     
     // Update UI
     fileNameDisplay.textContent = file.name;
-    updateStatus(`📂 Loading: ${file.name}...`, '');
+    updateStatus(`📂 Video loaded. Starting transcription...`, 'success');
     
     console.log('📁 File selected:', file.name);
     console.log('📁 File size:', (file.size / 1024 / 1024).toFixed(2), 'MB');
-    console.log('📁 MIME type:', getVideoMimeType(file.name));
-    console.log('📁 Blob URL:', fileURL);
+    console.log('📁 File path:', file.path);
+    
+    // Start transcription in the background
+    try {
+        updateStatus(`🎙️ Transcribing audio... This may take a minute.`, '');
+        
+        // Use Electron's IPC to call main process
+        const { ipcRenderer } = require('electron');
+
+
+        //! critical change, replace file path by buffer of file object (which is already mine)
+        const arrayBuffer = await file.arrayBuffer();
+        const buffer = Buffer.from(arrayBuffer);
+
+        const result = await ipcRenderer.invoke('transcribe-audio', {
+            name: file.name,
+            buffer: buffer
+        });
+                
+        // const result = await ipcRenderer.invoke('transcribe-audio', file.path);
+        
+        if (result.success) {
+            console.log('✅ Transcription successful!');
+            console.log('📝 Full text:', result.transcription.text);
+            console.log('📊 Segments:', result.transcription.segments);
+            
+            // Process and store subtitles
+            processTranscription(result.transcription);
+            
+            updateStatus(`✅ Transcription complete! ${subtitles.length} subtitles generated.`, 'success');
+        } else {
+            console.error('❌ Transcription failed:', result.error);
+            updateStatus(`❌ Transcription failed: ${result.error}`, 'error');
+        }
+        
+    } catch (error) {
+        console.error('❌ Error during transcription:', error);
+        updateStatus(`❌ Error: ${error.message}`, 'error');
+    }
 });
-
-/**
- * Get MIME type from filename
- * Based on Video.js getMimetype utility from documentation
- * 
- * @param {string} filename - The filename
- * @return {string} The MIME type
- */
-function getVideoMimeType(filename) {
-    const extension = filename.split('.').pop().toLowerCase();
-    
-    // From Video.js MimetypesKind documentation
-    const mimeTypes = {
-        'mp4': 'video/mp4',
-        'webm': 'video/webm',
-        'ogg': 'video/ogg',
-        'ogv': 'video/ogg',
-        'mov': 'video/mp4',
-        'm4v': 'video/mp4',
-        'avi': 'video/x-msvideo',
-        'mkv': 'video/x-matroska',
-        'flv': 'video/x-flv'
-    };
-    
-    return mimeTypes[extension] || 'video/mp4';
-}
-
 // =============================================================================
 // SUBTITLE DISPLAY FUNCTIONS
 // =============================================================================
@@ -376,3 +441,90 @@ window.addEventListener('DOMContentLoaded', function() {
 });
 
 console.log('✅ Renderer script loaded successfully!');
+
+
+// =============================================================================
+// TRANSCRIPTION PROCESSING
+// =============================================================================
+
+/**
+ * Process transcription from Whisper API
+ * Convert segments into subtitle format we can use
+ * 
+ * @param {Object} transcription - The transcription object from Whisper
+ */
+function processTranscription(transcription) {
+    // Clear any existing subtitles
+    subtitles = [];
+    currentSubtitleIndex = -1;
+    
+    if (!transcription.segments || transcription.segments.length === 0) {
+        console.warn('⚠️ No segments in transcription');
+        return;
+    }
+    
+    // Convert Whisper segments to our subtitle format
+    transcription.segments.forEach((segment, index) => {
+        // Simulate speaker detection (Whisper API doesn't provide this yet in basic version)
+        // In a real implementation, you'd use a diarization service
+        // For now, we'll alternate speakers every few segments for demo purposes
+        const speakerIndex = Math.floor(index / 2) % 6;  // Rotate through 6 speakers
+        const speaker = `SPEAKER_0${speakerIndex}`;
+        
+        subtitles.push({
+            start: segment.start,
+            end: segment.end,
+            text: segment.text.trim(),
+            speaker: speaker,
+            color: speakerColors[speaker] || defaultColor
+        });
+        
+        console.log(`💬 Subtitle ${index + 1}:`, {
+            time: `${segment.start.toFixed(1)}s - ${segment.end.toFixed(1)}s`,
+            speaker: speaker,
+            text: segment.text.trim()
+        });
+    });
+    
+    console.log(`✅ Processed ${subtitles.length} subtitles!`);
+}
+
+// =============================================================================
+// SUBTITLE SYNCHRONIZATION
+// =============================================================================
+
+/**
+ * Check if we should display a subtitle at the current time
+ * This is called many times per second by the timeupdate event
+ * 
+ * @param {number} currentTime - Current video time in seconds
+ */
+function checkAndDisplaySubtitle(currentTime) {
+    // Find the subtitle that should be shown at this time
+    let foundSubtitle = null;
+    let foundIndex = -1;
+    
+    for (let i = 0; i < subtitles.length; i++) {
+        const subtitle = subtitles[i];
+        
+        // Check if current time is within this subtitle's time range
+        if (currentTime >= subtitle.start && currentTime <= subtitle.end) {
+            foundSubtitle = subtitle;
+            foundIndex = i;
+            break;
+        }
+    }
+    
+    // If we found a subtitle and it's different from the current one
+    if (foundSubtitle && foundIndex !== currentSubtitleIndex) {
+        currentSubtitleIndex = foundIndex;
+        showSubtitle(`👤 ${foundSubtitle.speaker}: ${foundSubtitle.text}`, foundSubtitle.color);
+        
+        console.log(`💬 Showing subtitle ${foundIndex + 1}:`, foundSubtitle.text);
+    }
+    // If no subtitle found and we were showing one, hide it
+    else if (!foundSubtitle && currentSubtitleIndex !== -1) {
+        currentSubtitleIndex = -1;
+        hideSubtitle();
+    }
+}
