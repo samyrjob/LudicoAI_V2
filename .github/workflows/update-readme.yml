@@ -8,21 +8,20 @@ on:
     paths:
       - 'main.js'
       - 'renderer.js'
-      - '.github/workflows/update-readme.yml'  # Re-run if workflow changes
-  workflow_dispatch:  # Allow manual trigger
+  workflow_dispatch:
 
 jobs:
   update-readme:
     runs-on: ubuntu-latest
     
     permissions:
-      contents: write  # Allow pushing changes
+      contents: write
     
     steps:
       - name: 📥 Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for better context
+          fetch-depth: 0
       
       - name: 🔧 Setup Node.js
         uses: actions/setup-node@v4
@@ -38,18 +37,20 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: node .github/scripts/generate-readme.js
       
-      - name: 📝 Commit and push if changed
+      - name: 📝 Commit and push README
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # Check if README changed
-          if git diff --quiet README.md; then
-            echo "✅ No changes to README.md"
+          # Add README.md (works for both new and modified files)
+          git add README.md
+          
+          # Check if there are staged changes
+          if git diff --staged --quiet; then
+            echo "✅ No changes to commit (README unchanged)"
           else
-            echo "📝 README.md has changes, committing..."
-            git add README.md
+            echo "📝 Committing README.md..."
             git commit -m "🤖 Auto-update README via AI [skip ci]"
             git push
-            echo "✅ README.md updated and pushed!"
+            echo "✅ README.md committed and pushed! 🎉"
           fi
