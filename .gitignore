@@ -1,0 +1,54 @@
+# Node modules - NEVER commit these!
+node_modules/
+package-lock.json
+
+# Build output
+dist/
+build/
+
+#RAG CLAUDE DIRECTORY
+RAG_Claude/
+
+# Video files
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.flv
+*.wmv
+
+# Audio files
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.ogg
+*.flac
+
+# Large media files
+*.zip
+*.rar
+*.7z
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Environment variables (IMPORTANT - contains API keys!)
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+#text files
+*.txt
+*.pkl
+*.faiss
+RAG_Claude/
