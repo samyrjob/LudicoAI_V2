@@ -1,0 +1,55 @@
+name: Auto-Update README with AI
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'main.js'
+      - 'renderer.js'
+      - '.github/workflows/update-readme.yml'  # Re-run if workflow changes
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write  # Allow pushing changes
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for better context
+      
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: 📦 Install dependencies
+        run: |
+          npm install @anthropic-ai/sdk
+      
+      - name: 🤖 Generate README with AI
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: node .github/scripts/generate-readme.js
+      
+      - name: 📝 Commit and push if changed
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Check if README changed
+          if git diff --quiet README.md; then
+            echo "✅ No changes to README.md"
+          else
+            echo "📝 README.md has changes, committing..."
+            git add README.md
+            git commit -m "🤖 Auto-update README via AI [skip ci]"
+            git push
+            echo "✅ README.md updated and pushed!"
+          fi
