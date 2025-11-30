@@ -292,7 +292,9 @@ function getVideoMimeType(filename) {
  * 4. Receive subtitles and store them
  * 5. Subtitles will show automatically during playback (via timeupdate event)
  */
+
 //! old version
+
 // videoFileInput.addEventListener('change', async function(event) {
 //     const file = event.target.files[0];
     
@@ -319,13 +321,12 @@ function getVideoMimeType(filename) {
     
 //     // Start transcription in the background
 //     try {
-//         updateStatus(`🎙️ Transcribing audio... This may take a minute.`, '');
+//         updateStatus(`🎙️ Transcribing audio... This may take a few minutes.`, '');
         
 //         // Use Electron's IPC to call main process
 //         const { ipcRenderer } = require('electron');
 
-
-//         //! critical change, replace file path by buffer of file object (which is already mine)
+//         // Convert file to buffer
 //         const arrayBuffer = await file.arrayBuffer();
 //         const buffer = Buffer.from(arrayBuffer);
 
@@ -333,17 +334,39 @@ function getVideoMimeType(filename) {
 //             name: file.name,
 //             buffer: buffer
 //         });
-                
         
 //         if (result.success) {
 //             console.log('✅ Transcription successful!');
 //             console.log('📝 Full text:', result.transcription.text);
 //             console.log('📊 Segments:', result.transcription.segments);
             
+//             // =========================================================================
+//             // SHOW METADATA - NEW!
+//             // =========================================================================
+//             if (result.metadata) {
+//                 console.log('⏱️ Duration:', result.metadata.durationMinutes, 'minutes');
+//                 console.log('📦 Original size:', result.metadata.originalSizeMB, 'MB');
+//                 console.log('🎵 Compressed audio size:', result.metadata.compressedSizeMB, 'MB');
+//                 console.log('✂️ Used chunking:', result.metadata.wasChunked ? 'Yes' : 'No');
+                
+//                 // Show user-friendly message
+//                 if (result.metadata.wasChunked) {
+//                     console.log('🎬 This was a long video, so it was processed in 20-minute chunks');
+//                 }
+//             }
+            
 //             // Process and store subtitles
 //             processTranscription(result.transcription);
             
-//             updateStatus(`✅ Transcription complete! ${subtitles.length} subtitles generated.`, 'success');
+//             // =========================================================================
+//             // ENHANCED STATUS MESSAGE - NEW!
+//             // =========================================================================
+//             const statusMsg = result.metadata?.wasChunked 
+//                 ? `✅ Transcription complete! ${subtitles.length} subtitles (${result.metadata.durationMinutes} min video, processed in chunks)`
+//                 : `✅ Transcription complete! ${subtitles.length} subtitles generated (${result.metadata?.durationMinutes || '?'} min video)`;
+            
+//             updateStatus(statusMsg, 'success');
+            
 //         } else {
 //             console.error('❌ Transcription failed:', result.error);
 //             updateStatus(`❌ Transcription failed: ${result.error}`, 'error');
@@ -354,6 +377,8 @@ function getVideoMimeType(filename) {
 //         updateStatus(`❌ Error: ${error.message}`, 'error');
 //     }
 // });
+
+
 videoFileInput.addEventListener('change', async function(event) {
     const file = event.target.files[0];
     
@@ -372,16 +397,13 @@ videoFileInput.addEventListener('change', async function(event) {
     
     // Update UI
     fileNameDisplay.textContent = file.name;
-    updateStatus(`📂 Video loaded. Starting transcription...`, 'success');
+    updateStatus(`📂 Video loaded. Checking cache...`, 'success');
     
     console.log('📁 File selected:', file.name);
     console.log('📁 File size:', (file.size / 1024 / 1024).toFixed(2), 'MB');
-    console.log('📁 File path:', file.path);
     
     // Start transcription in the background
     try {
-        updateStatus(`🎙️ Transcribing audio... This may take a few minutes.`, '');
-        
         // Use Electron's IPC to call main process
         const { ipcRenderer } = require('electron');
 
@@ -396,11 +418,25 @@ videoFileInput.addEventListener('change', async function(event) {
         
         if (result.success) {
             console.log('✅ Transcription successful!');
+            
+            // =========================================================================
+            // CHECK IF FROM CACHE 💰
+            // =========================================================================
+            if (result.metadata.fromCache) {
+                console.log('💰 LOADED FROM CACHE - 0 API CREDITS USED!');
+                console.log('📅 Originally cached at:', result.metadata.cachedAt);
+                updateStatus(`💰 Loaded from cache! (saved API credits)`, 'success');
+            } else {
+                console.log('🎙️ NEW TRANSCRIPTION - Used API credits');
+                console.log('💾 Saved to cache for next time');
+                updateStatus(`🎙️ Transcribing audio... This may take a few minutes.`, '');
+            }
+            
             console.log('📝 Full text:', result.transcription.text);
             console.log('📊 Segments:', result.transcription.segments);
             
             // =========================================================================
-            // SHOW METADATA - NEW!
+            // SHOW METADATA
             // =========================================================================
             if (result.metadata) {
                 console.log('⏱️ Duration:', result.metadata.durationMinutes, 'minutes');
@@ -408,8 +444,7 @@ videoFileInput.addEventListener('change', async function(event) {
                 console.log('🎵 Compressed audio size:', result.metadata.compressedSizeMB, 'MB');
                 console.log('✂️ Used chunking:', result.metadata.wasChunked ? 'Yes' : 'No');
                 
-                // Show user-friendly message
-                if (result.metadata.wasChunked) {
+                if (result.metadata.wasChunked && !result.metadata.fromCache) {
                     console.log('🎬 This was a long video, so it was processed in 20-minute chunks');
                 }
             }
@@ -418,11 +453,16 @@ videoFileInput.addEventListener('change', async function(event) {
             processTranscription(result.transcription);
             
             // =========================================================================
-            // ENHANCED STATUS MESSAGE - NEW!
+            // ENHANCED STATUS MESSAGE
             // =========================================================================
-            const statusMsg = result.metadata?.wasChunked 
-                ? `✅ Transcription complete! ${subtitles.length} subtitles (${result.metadata.durationMinutes} min video, processed in chunks)`
-                : `✅ Transcription complete! ${subtitles.length} subtitles generated (${result.metadata?.durationMinutes || '?'} min video)`;
+            let statusMsg;
+            if (result.metadata.fromCache) {
+                statusMsg = `💰 Loaded from cache! ${subtitles.length} subtitles (${result.metadata.durationMinutes} min video) - 0 API credits used!`;
+            } else if (result.metadata?.wasChunked) {
+                statusMsg = `✅ Transcription complete! ${subtitles.length} subtitles (${result.metadata.durationMinutes} min video, processed in chunks)`;
+            } else {
+                statusMsg = `✅ Transcription complete! ${subtitles.length} subtitles (${result.metadata?.durationMinutes || '?'} min video)`;
+            }
             
             updateStatus(statusMsg, 'success');
             
@@ -436,9 +476,6 @@ videoFileInput.addEventListener('change', async function(event) {
         updateStatus(`❌ Error: ${error.message}`, 'error');
     }
 });
-
-
-
 
 
 
@@ -619,3 +656,20 @@ function checkAndDisplaySubtitle(currentTime) {
         hideSubtitle();
     }
 }
+
+// View cache
+document.getElementById('viewCacheBtn').addEventListener('click', async () => {
+    const { ipcRenderer } = require('electron');
+    const stats = await ipcRenderer.invoke('get-cache-stats');
+    console.log('📊 Cache Stats:', stats);
+    alert(`Cached videos: ${stats.totalEntries}`);
+});
+
+// Clear cache
+document.getElementById('clearCacheBtn').addEventListener('click', async () => {
+    const { ipcRenderer } = require('electron');
+    const result = await ipcRenderer.invoke('clear-cache');
+    if (result.success) {
+        alert('Cache cleared!');
+    }
+});
